@@ -1,101 +1,139 @@
 #include <Windows.h>
 #include <stdio.h>
-
-BOOL IsPathValidW(PWCHAR FilePath)
-{
+// Function to check if path is valid
+BOOL IsPathValidW(PWCHAR FilePath) {
     HANDLE hFile = INVALID_HANDLE_VALUE;
     hFile = CreateFileW(FilePath, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hFile == INVALID_HANDLE_VALUE)
+    if (hFile == INVALID_HANDLE_VALUE) {
+        wprintf(L"Invalid file path: %ls\n", FilePath);
         return FALSE;
-    if (hFile)
+    }
+    if (hFile) {
         CloseHandle(hFile);
+    }
     return TRUE;
 }
 
-SIZE_T StringLengthA(LPCSTR String)
-{
+// Function to get the length of a string
+SIZE_T StringLengthA(LPCSTR String) {
     LPCSTR String2;
     for (String2 = String; *String2; ++String2);
+    wprintf(L"%lld\n", String2 - String);
     return (String2 - String);
 }
 
-BOOL CreateFraction(PBYTE DataBlock, DWORD dwWriteSize, PWCHAR OutputDirectory)
-{
+BOOL CreateFraction(PBYTE DataBlock, DWORD dwWriteSize, PWCHAR OutputDirectory) {
     HANDLE hHandle = INVALID_HANDLE_VALUE;
-    WCHAR OutputPath[MAX_PATH * sizeof(WCHAR)] = { 0 };
-    DWORD dwOut = ERROR_SUCCESS;
-    BOOL bFlag = FALSE;
-    CHAR FileHeader[MAX_PATH] = { 0 };
+    WCHAR szFractionPath[MAX_PATH] = { 0 };
+    static DWORD dwFractionCounter = 0;
+    DWORD dwBytesWritten = 0;
 
-    for (DWORD dwFractionCount = 0;; dwFractionCount++)
-    {
-        _snwprintf_s(OutputPath, MAX_PATH * sizeof(WCHAR), L"%wsFraction%ld", OutputDirectory, dwFractionCount);
-        if (IsPathValidW(OutputPath))
-            continue;
-        else
-        {
-            _snprintf_s(FileHeader, MAX_PATH, "<%ld>", dwFractionCount);
-            if (strlen(FileHeader) < 32)
-            {
-                DWORD dwOffset = (DWORD)(32 - strlen(FileHeader));
-                for (DWORD dwX = 0; dwX < dwOffset; dwX++)
-                {
-                    strcat_s(FileHeader, " ");
-                }
-            }
-            break;
-        }
+    // Create directory if it doesn't exist
+    if (!CreateDirectoryW(OutputDirectory, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) {
+        wprintf(L"Failed to create directory: %ls\n", OutputDirectory);
+        return FALSE;
     }
 
-    hHandle = CreateFileW(OutputPath, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hHandle == INVALID_HANDLE_VALUE)
-        goto EXIT_ROUTINE;
-    if (!WriteFile(hHandle, FileHeader, 32, &dwOut, NULL))
-        goto EXIT_ROUTINE;
-    dwOut = ERROR_SUCCESS;
-    if (!WriteFile(hHandle, DataBlock, dwWriteSize, &dwOut, NULL))
-        goto EXIT_ROUTINE;
-    bFlag = TRUE;
+    // Construct fraction path
+    swprintf_s(szFractionPath, MAX_PATH, L"%ls\\Fraction%d", OutputDirectory, dwFractionCounter++);
 
-EXIT_ROUTINE:
-    if (hHandle)
+    // Create file
+    hHandle = CreateFileW(
+        szFractionPath,
+        GENERIC_WRITE,
+        0,
+        NULL,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+    // Check if file handle is valid
+    if (hHandle == INVALID_HANDLE_VALUE) {
+        wprintf(L"Failed to create file: %ls\n", szFractionPath);
+        return FALSE;
+    }
+
+    // Write data
+    if (!WriteFile(hHandle, DataBlock, dwWriteSize, &dwBytesWritten, NULL)) {
+        wprintf(L"Failed to write to file: %ls\n", szFractionPath);
         CloseHandle(hHandle);
-    return bFlag;
+        return FALSE;
+    }
+    // Close file handle
+    CloseHandle(hHandle);
+    return TRUE;
 }
 
-int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nShowCmd)
+
+int WINAPI WinMain(
+    _In_ HINSTANCE hInstance,
+    _In_opt_ HINSTANCE hPrevInstance,
+    _In_ LPSTR lpCmdLine,
+    _In_ int nShowCmd
+)
 {
+    wprintf(L"Program started\n");
+
     HANDLE hHandle = INVALID_HANDLE_VALUE;
     DWORD dwError = ERROR_SUCCESS;
     BOOL bFlag = FALSE;
     BOOL EndOfFile = FALSE;
+    // Get command line arguments
     INT Arguments;
     LPWSTR* szArgList = CommandLineToArgvW(GetCommandLineW(), &Arguments);
 
+    if (Arguments < 3) {
+        wprintf(L"Usage: <program> <input file> <output directory>\n");
+        return ERROR_INVALID_PARAMETER;
+    }
+    // Create file handle to target program
+    wprintf(L"Reading file\n");
     hHandle = CreateFileW(szArgList[1], GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hHandle == INVALID_HANDLE_VALUE)
-        goto EXIT_ROUTINE;
 
-    do
-    {
+    wprintf(L"Attempting to open file\n");
+    // Check if file handle is valid
+    if (hHandle == INVALID_HANDLE_VALUE) {
+        wprintf(L"Failed to open file: %ls\n", szArgList[1]);
+        goto EXIT_ROUTINE;
+    }
+
+    do {
         BYTE Buffer[1024] = { 0 };
         DWORD dwRead = ERROR_SUCCESS;
-        if (!ReadFile(hHandle, Buffer, 1024, &dwRead, NULL))
+        // Read file
+        if (!ReadFile(hHandle, Buffer, 1024, &dwRead, NULL)) {
+            wprintf(L"Failed to read file\n");
             goto EXIT_ROUTINE;
-        if (dwRead < 1024)
-            EndOfFile = TRUE;
-        if (!CreateFraction(Buffer, dwRead, szArgList[2]))
-            goto EXIT_ROUTINE;
-        ZeroMemory(Buffer, sizeof(Buffer));
-    } while (!EndOfFile);
+        }
 
+        if (dwRead < 1024) {
+            EndOfFile = TRUE;
+        }
+        // Create fractions of file
+        if (!CreateFraction(Buffer, dwRead, szArgList[2])) {
+            wprintf(L"Failed to create fraction\n");
+            goto EXIT_ROUTINE;
+        }
+
+        ZeroMemory(Buffer, sizeof(Buffer));
+
+    } while (!EndOfFile);
+    // Set binary flag to true
     bFlag = TRUE;
+    wprintf(L"Operation Completed Successfully\n");
 
 EXIT_ROUTINE:
-    if (!bFlag)
+    // Free memory
+    if (!bFlag) {
         dwError = GetLastError();
+        wprintf(L"Error: %ld\n", dwError);
+    }
     LocalFree(szArgList);
-    if (hHandle)
+    // Close file handle
+    if (hHandle) {
         CloseHandle(hHandle);
+    }
     return dwError;
 }
+
+
